@@ -1,30 +1,30 @@
 // Copyright (c) 2013 Melvin Tercan, https://github.com/melvinmt
 //
-// Permission is hereby granted, free of charge, to any person obtaining a copy of this 
-// software and associated documentation files (the "Software"), to deal in the Software 
-// without restriction, including without limitation the rights to use, copy, modify, 
-// merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit 
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify,
+// merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
 // persons to whom the Software is furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all copies or 
+// The above copyright notice and this permission notice shall be included in all copies or
 // substantial portions of the Software.
-// 
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, 
-// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR 
-// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE 
-// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR 
-// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-
 /* A tiny but powerful Go internationalization (i18n) library.
-*/
+ */
 package gt
 
 import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sync"
 )
 
 // Strings is a map type in the form of map[key]map[language][translation]
@@ -32,11 +32,19 @@ type Strings map[string]map[string]string
 
 // Set up Build environment first before starting translations.
 type Build struct {
-	Origin     string         // the origin env
-	Target     string         // the target env
-	Index      Strings        // the index which contains all keys and strings
+	Origin     string // the origin env
+	Target     string // the target env
+	Index      Strings
 	regexVerbs *regexp.Regexp // caching regex Compiles
 	regexTags  *regexp.Regexp
+	safeIndex  *sync.Map
+}
+
+func (b *Build) Init() {
+	b.safeIndex = &sync.Map{}
+	for k, v := range b.Index {
+		b.safeIndex.Store(k, v)
+	}
 }
 
 // T() is a shorthand method for Translate. Ignores errors and strictly returns strings.
@@ -55,6 +63,15 @@ func (b *Build) SetTarget(lang string) {
 	b.Target = lang
 }
 
+func (b *Build) getIndex(key, sub string) (string, bool) {
+	if m, ok := b.safeIndex.Load(key); ok {
+		o := m.(map[string]string)
+		v, ok := o[sub]
+		return v, ok
+	}
+	return "", false
+}
+
 // Translate() translates a key or string from origin to target.
 // Parses augmented sprintf format when additional arguments are given.
 func (b *Build) Translate(str string, args ...interface{}) (t string, err error) {
@@ -71,26 +88,28 @@ func (b *Build) Translate(str string, args ...interface{}) (t string, err error)
 	var o string // origin string
 	key := str   // key can differ from str
 
-	if val, ok := b.Index[key][b.Origin]; ok {
+	if val, ok := b.getIndex(key, b.Origin); ok {
 		o = val
-	} else if val, ok := b.Index[key][b.Origin[:2]]; ok {
+	} else if val, ok := b.getIndex(key, b.Origin[:2]); ok {
 		o = val
 	} else {
 		// If key is not found, try matching strings in origin.
-		for k, m := range b.Index {
-			for l, v := range m {
+		b.safeIndex.Range(func(rk, rv interface{}) bool {
+			k := rk.(string)
+			for l, v := range rv.(map[string]string) {
 				if (l == b.Origin || l == b.Origin[:2]) && key == v {
 					o, key = v, k
-					break
+					return false
 				}
 			}
-		}
+			return true
+		})
 	}
 
 	// Try to find target string by key or key[:2]
-	if val, ok := b.Index[key][b.Target]; ok {
+	if val, ok := b.getIndex(key, b.Target); ok {
 		t = val
-	} else if val, ok := b.Index[key][b.Target[:2]]; ok {
+	} else if val, ok := b.getIndex(key, b.Target[:2]); ok {
 		t = val
 	}
 
