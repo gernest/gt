@@ -47,6 +47,15 @@ func (b *Build) Init() {
 	}
 }
 
+func (b *Build) AddIndex(s Strings) {
+	if b.Index == nil {
+		b.Index = make(Strings)
+	}
+	for k, v := range s {
+		b.Index[k] = v
+	}
+}
+
 // T() is a shorthand method for Translate. Ignores errors and strictly returns strings.
 func (b *Build) T(s string, a ...interface{}) (t string) {
 	t, _ = b.Translate(s, a...)
